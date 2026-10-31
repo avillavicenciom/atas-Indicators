@@ -1,0 +1,103 @@
+name: Sync upstream ATAS Indicators
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream-atas-indicators
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: Develop
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch official ATAS upstream
+        run: |
+          git remote add upstream https://github.com/AtasPlatform/Indicators.git
+          git fetch upstream Develop
+
+      - name: Check for upstream changes
+        id: check
+        shell: bash
+        run: |
+          if git merge-base --is-ancestor upstream/Develop origin/Develop; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "Fork is already up to date with upstream."
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "New upstream commits detected."
+          fi
+
+      - name: Prepare sync branch
+        if: steps.check.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          BRANCH="automation/sync-upstream-develop"
+          git checkout -B "$BRANCH" origin/Develop
+          git merge --no-edit upstream/Develop
+          git push --force-with-lease origin "$BRANCH"
+
+      - name: Create or update pull request
+        if: steps.check.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          BRANCH="automation/sync-upstream-develop"
+          TITLE="chore: sync AtasPlatform/Indicators upstream"
+          BODY_FILE="/tmp/pr-body.md"
+
+          cat > "$BODY_FILE" <<'EOF'
+          Automatic synchronization from the official ATAS Indicators repository.
+
+          Upstream:
+          - Repository: https://github.com/AtasPlatform/Indicators
+          - Branch: `Develop`
+
+          Target:
+          - Fork: `avillavicenciom/atas-Indicators`
+          - Branch: `Develop`
+
+          This PR is intentionally not auto-merged so upstream changes can be reviewed before they become the reference used by the adaptive trading project.
+          EOF
+
+          EXISTING_PR=$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --base Develop \
+            --head "$BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING_PR" ]; then
+            gh pr edit "$EXISTING_PR" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --body-file "$BODY_FILE"
+            echo "Updated existing PR #$EXISTING_PR"
+          else
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base Develop \
+              --head "$BRANCH" \
+              --title "$TITLE" \
+              --body-file "$BODY_FILE"
+          fi
