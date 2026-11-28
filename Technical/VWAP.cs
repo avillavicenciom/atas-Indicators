@@ -10,7 +10,7 @@ using System.ComponentModel.DataAnnotations;
 [Category(IndicatorCategories.VolumeOrderFlow)]
 [Display(ResourceType = typeof(Strings), Description = nameof(Strings.VWAPDescription))]
 [HelpLink("https://help.atas.net/support/solutions/articles/72000602503")]
-public class VWAP : Indicator
+public class VWAP : Indicator, IBidAskVolumeDependent
 {
     #region Nested types
 
@@ -497,6 +497,8 @@ public class VWAP : Indicator
 
     #region ctor
 
+    BidAskVolumeUsage IBidAskVolumeDependent.BidAskVolumeUsage => TWAPMode == VWAPMode.VWAP && VolumeMode is VolumeType.Bid or VolumeType.Ask ? BidAskVolumeUsage.Full : BidAskVolumeUsage.None;
+
     public VWAP()
         : base(DataSeriesType.HLC3)
     {
@@ -714,7 +716,8 @@ public class VWAP : Indicator
             case VWAPPeriodType.M15 when PeriodNumber(prevCandle.Time, TimeSpan.FromMinutes(15)) != PeriodNumber(candle.Time, TimeSpan.FromMinutes(15)):
             case VWAPPeriodType.M30 when PeriodNumber(prevCandle.Time, TimeSpan.FromMinutes(30)) != PeriodNumber(candle.Time, TimeSpan.FromMinutes(30)):
             case VWAPPeriodType.Hourly when prevCandle.Time.Hour != candle.Time.Hour:
-            case VWAPPeriodType.H4 when PeriodNumber(prevCandle.Time, TimeSpan.FromHours(4)) != PeriodNumber(candle.Time, TimeSpan.FromHours(4)):
+            // H4 periods follow the chart's H4 candles: counted from the session start, not from midnight UTC.
+            case VWAPPeriodType.H4 when DataProvider!.GetCustomStartTime(prevCandle.Time, TimeSpan.FromHours(4)) != DataProvider.GetCustomStartTime(candle.Time, TimeSpan.FromHours(4)):
             case VWAPPeriodType.Daily when IsNewSession(bar):
             case VWAPPeriodType.Weekly when IsNewWeek(bar):
             case VWAPPeriodType.Monthly when IsNewMonth(bar):
